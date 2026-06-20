@@ -1,0 +1,59 @@
+<input id="times" type="number" value="1000000" min="1">
+<button id="regen">재생성</button>
+<progress id="prog" value="0" max="1"></progress>
+
+<canvas id="hist" width="900" height="300"></canvas>
+
+<script>
+const canvas = document.getElementById("hist")
+const ctx = canvas.getContext("2d")
+
+const timesInput = document.getElementById("times")
+const button = document.getElementById("regen")
+const prog = document.getElementById("prog")
+
+async function generate() {
+
+  const times = Number(timesInput.value)
+  const counts = new Uint32Array(256)
+
+  let generated = 0
+  prog.value = 0
+
+  while (generated < times) {
+
+    const size = Math.min(65536, times - generated)
+    const buf = new Uint8Array(size)
+
+    crypto.getRandomValues(buf)
+
+    for (let i = 0; i < size; i++) {
+      const v = buf[i] - 128
+      counts[v + 128]++
+    }
+
+    generated += size
+    prog.value = generated / times
+
+    await new Promise(r => setTimeout(r))
+  }
+
+  draw(counts)
+}
+
+function draw(counts) {
+
+  ctx.clearRect(0,0,canvas.width,canvas.height)
+
+  const w = canvas.width / 256
+  const max = Math.max(...counts)
+
+  for (let i = 0; i < 256; i++) {
+    const h = counts[i] / max * canvas.height
+    ctx.fillRect(i * w, canvas.height - h, w, h)
+  }
+}
+
+button.onclick = generate
+generate()
+</script>

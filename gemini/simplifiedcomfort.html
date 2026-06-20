@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>실시간 맞춤형 열쾌적 지수 시뮬레이터</title>
+    <style>
+        body { font-family: 'Malgun Gothic', sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #2c3e50; margin-bottom: 25px; }
+        .control-group { margin-bottom: 20px; }
+        .control-group label { display: block; font-weight: bold; margin-bottom: 8px; color: #34495e; }
+        .slider-box { display: flex; align-items: center; gap: 15px; }
+        input[type="range"] { flex: 1; height: 8px; border-radius: 5px; background: #ddd; accent-color: #3498db; }
+        .value-disp { width: 70px; text-align: right; font-weight: bold; color: #2c3e50; }
+        
+        .result-box { text-align: center; margin-top: 30px; padding: 20px; border-radius: 10px; background: #ecf0f1; transition: all 0.3s ease; }
+        .score { font-size: 3rem; font-weight: bold; margin: 10px 0; }
+        .status { font-size: 1.2rem; font-weight: bold; }
+        
+        /* 불쾌도 색상 클래스 */
+        .color-good { background-color: #e8f8f5; color: #117a65; }
+        .color-normal { background-color: #fef9e7; color: #b7950b; }
+        .color-bad { background-color: #fdf2e9; color: #ba4a00; }
+        .color-danger { background-color: #f9ebea; color: #922b21; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>실시간 열쾌적 지수 (모델 A 수정형)</h2>
+    
+    <!-- 기온 입력 -->
+    <div class="control-group">
+        <label>실내 기온 (°C)</label>
+        <div class="slider-box">
+            <input type="range" id="temp" min="15" max="38" step="0.1" value="26">
+            <span class="value-disp" id="temp_val">26.0 °C</span>
+        </div>
+    </div>
+
+    <!-- 습도 입력 -->
+    <div class="control-group">
+        <label>상대 습도 (%)</label>
+        <div class="slider-box">
+            <input type="range" id="humidity" min="10" max="100" step="1" value="60">
+            <span class="value-disp" id="humidity_val">60 %</span>
+        </div>
+    </div>
+
+    <!-- 대사량 입력 -->
+    <div class="control-group">
+        <label>인체 대사량 (Met)</label>
+        <div class="slider-box">
+            <input type="range" id="met" min="0.8" max="3.0" step="0.1" value="1.2">
+            <span class="value-disp" id="met_val">1.2 Met</span>
+        </div>
+    </div>
+
+    <!-- 선풍기 소비전력 입력 -->
+    <div class="control-group">
+        <label>선풍기 총 소비전력 (W)</label>
+        <div class="slider-box">
+            <input type="range" id="fan" min="0" max="200" step="1" value="30">
+            <span class="value-disp" id="fan_val">30 W</span>
+        </div>
+    </div>
+
+    <!-- 전자기기 TDP 입력 -->
+    <div class="control-group">
+        <label>기계/컴퓨터 총 발열량 (TDP, W)</label>
+        <div class="slider-box">
+            <input type="range" id="tdp" min="0" max="2000" step="50" value="400">
+            <span class="value-disp" id="tdp_val">400 W</span>
+        </div>
+    </div>
+
+    <!-- 결과창 -->
+    <div class="result-box" id="result_card">
+        <div>현재 공간 불쾌지수</div>
+        <div class="score" id="score_disp">0.0</div>
+        <div class="status" id="status_disp">계산 중...</div>
+    </div>
+</div>
+
+<script>
+    // 슬라이더 및 라벨 매핑 요소 취득
+    const inputs = ['temp', 'humidity', 'met', 'fan', 'tdp'];
+    const elements = {};
+    inputs.forEach(id => {
+        elements[id] = document.getElementById(id);
+        elements[`${id}_val`] = document.getElementById(`${id}_val`);
+    });
+    
+    const scoreDisp = document.getElementById('score_disp');
+    const statusDisp = document.getElementById('status_disp');
+    const resultCard = document.getElementById('result_card');
+
+    function calculateIndex() {
+        // 1. 값 추출
+        const T = parseFloat(elements.temp.value);
+        const RH = parseFloat(elements.humidity.value);
+        const M = parseFloat(elements.met.value);
+        const W_fan = parseFloat(elements.fan.value);
+        const TDP = parseFloat(elements.tdp.value);
+
+        // 2. 화면 단위 업데이트
+        elements.temp_val.innerText = T.toFixed(1) + " °C";
+        elements.humidity_val.innerText = RH + " %";
+        elements.met_val.innerText = M.toFixed(1) + " Met";
+        elements.fan_val.innerText = W_fan + " W";
+        elements.tdp_val.innerText = TDP + " W";
+
+        // 3. 변수 물리량 변환 및 보정 계산
+        // 풍속 공식 수정: 전력량의 세제곱근에 비례 적용 (기본 대류풍속 0.1m/s 가산, 최대 약 2.5m/s 타겟팅)
+        const V = 0.1 + (0.4 * Math.cbrt(W_fan)); 
+
+        // 미국 국립기상청(NWS) Simple 단순화 불쾌지수 공식 베이스
+        // 단순 기온과 습도에 의한 기초 DI 산출
+        const base_DI = 0.72 * (T + (T * (RH / 100))) + 40.6;
+
+        // 4. 확장 가중치 반영 (풍속 감점, 복사열 가점, 대사량 가점)
+        const v_effect = 2.8 * V;               // 바람으로 인한 냉각 효과 (지수 차감)
+        const tdp_effect = 0.002 * TDP;          // TDP 발열로 인한 복사열 페널티 (1000W당 약 +2)
+        const met_effect = 3.5 * (M - 1.0);      // 기본 휴식상태(1.0) 기준 활동성 페널티
+
+        // 최종 종합 지수
+        let final_index = base_DI - v_effect + tdp_effect + met_effect;
+        final_index = Math.round(final_index * 10) / 10; // 소수점 첫째자리 반올림
+
+        // 5. 화면 표시 및 상태 색상 변경
+        scoreDisp.innerText = final_index.toFixed(1);
+        
+        resultCard.className = "result-box"; // 클래스 초기화
+        if (final_index < 70) {
+            statusDisp.innerText = "쾌적함 😄 (다수가 만족하는 상태)";
+            resultCard.classList.add("color-good");
+        } else if (final_index >= 70 && final_index < 75) {
+            statusDisp.innerText = "적당함 🙂 (일부 민감한 사람만 불쾌함)";
+            resultCard.classList.add("color-normal");
+        } else if (final_index >= 75 && final_index < 80) {
+            statusDisp.innerText = "다소 불쾌 😐 (반수 이상이 더위를 느낌)";
+            resultCard.classList.add("color-bad");
+        } else {
+            statusDisp.innerText = "매우 불쾌 🥵 (조치가 시급함 / 에어컨 가동 추천)";
+            resultCard.classList.add("color-danger");
+        }
+    }
+
+    // 모든 슬라이더에 이벤트 리스너 등록
+    inputs.forEach(id => {
+        elements[id].addEventListener('input', calculateIndex);
+    });
+
+    // 초기 실행
+    calculateIndex();
+</script>
+
+</body>
+</html>

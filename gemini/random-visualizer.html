@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>랜덤 분포 시각화</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Noto+Sans+KR:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a26;
+    --border: #2a2a3e;
+    --text: #e8e8f0;
+    --muted: #6a6a88;
+    --accent: #7c6af7;
+
+    --c0: #7c6af7;
+    --c1: #f76a8a;
+    --c2: #6af7b8;
+    --c3: #f7c86a;
+    --c4: #6ab8f7;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Noto Sans KR', sans-serif;
+    font-weight: 300;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    padding: 28px 32px;
+    gap: 20px;
+  }
+
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+  }
+
+  header h1 {
+    font-family: 'Space Mono', monospace;
+    font-size: 1.1rem;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+  }
+
+  header span {
+    font-size: 0.78rem;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+  }
+
+  .controls-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 18px;
+  }
+
+  .control-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  label {
+    font-size: 0.78rem;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+
+  input[type="number"] {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.85rem;
+    padding: 6px 10px;
+    width: 110px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input[type="number"]:focus { border-color: var(--accent); }
+
+  .divider { width: 1px; height: 28px; background: var(--border); margin: 0 4px; }
+
+  .mode-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex: 1;
+  }
+
+  .chip {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 12px 5px 10px;
+    border-radius: 20px;
+    border: 1.5px solid var(--border);
+    background: var(--surface2);
+    cursor: pointer;
+    font-size: 0.78rem;
+    letter-spacing: 0.02em;
+    color: var(--muted);
+    transition: all 0.18s;
+    user-select: none;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--text); }
+  .chip.active {
+    color: var(--text);
+    background: transparent;
+  }
+  .chip .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    opacity: 0.4;
+    transition: opacity 0.18s;
+  }
+  .chip.active .dot { opacity: 1; }
+
+  .btn-regen {
+    margin-left: auto;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 7px;
+    padding: 8px 20px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.82rem;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: opacity 0.15s, transform 0.12s;
+  }
+  .btn-regen:hover { opacity: 0.88; transform: translateY(-1px); }
+  .btn-regen:active { transform: translateY(0); }
+  .btn-regen:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  .progress-bar {
+    height: 4px;
+    background: var(--surface2);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.08s linear;
+  }
+
+  .graph-area {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    flex: 1;
+  }
+
+  /* Overlay mode */
+  .overlay-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px 14px;
+    display: none;
+  }
+  .overlay-wrap.visible { display: block; }
+  .overlay-label {
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  /* Individual panels */
+  .panels-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 14px;
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px 12px;
+    display: none;
+  }
+  .panel.visible { display: block; }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .panel-dot { width: 9px; height: 9px; border-radius: 50%; }
+  .panel-title {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+  }
+  .panel-stats {
+    margin-left: auto;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    display: flex;
+    gap: 12px;
+  }
+
+  canvas.dist-canvas {
+    width: 100%;
+    height: 160px;
+    display: block;
+    border-radius: 4px;
+  }
+
+  canvas#overlay-canvas {
+    width: 100%;
+    height: 220px;
+    display: block;
+    border-radius: 4px;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 8px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+  .legend-line { width: 16px; height: 2px; border-radius: 1px; }
+
+  .view-toggle {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    overflow: hidden;
+  }
+  .view-btn {
+    padding: 5px 14px;
+    font-size: 0.75rem;
+    background: var(--surface2);
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.03em;
+  }
+  .view-btn.active {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .status-line {
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    letter-spacing: 0.03em;
+    min-height: 1em;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>DIST·SCOPE</h1>
+  <span>랜덤 분포 시각화 + 비교</span>
+</header>
+
+<div class="controls-row">
+  <div class="control-group">
+    <label>샘플 수</label>
+    <input type="number" id="times" value="500000" min="1000" max="5000000" step="100000">
+  </div>
+  <div class="control-group">
+    <label>빈 수</label>
+    <input type="number" id="bins" value="128" min="16" max="512" step="16">
+  </div>
+  <div class="divider"></div>
+
+  <div class="mode-chips" id="mode-chips"></div>
+
+  <div class="divider"></div>
+
+  <div class="view-toggle">
+    <button class="view-btn active" id="btn-separate">개별</button>
+    <button class="view-btn" id="btn-overlay">오버레이</button>
+  </div>
+
+  <button class="btn-regen" id="regen">▶ 생성</button>
+</div>
+
+<div class="progress-bar" id="prog-bar">
+  <div class="progress-fill" id="prog-fill"></div>
+</div>
+
+<div class="status-line" id="status"></div>
+
+<div class="graph-area">
+  <div class="overlay-wrap" id="overlay-wrap">
+    <div class="overlay-label">분포 비교 — 오버레이</div>
+    <canvas id="overlay-canvas" width="900" height="220"></canvas>
+    <div class="legend" id="overlay-legend"></div>
+  </div>
+  <div class="panels-grid" id="panels-grid"></div>
+</div>
+
+<script>
+// ── crypto.getRandomValues 안전 래퍼 (최대 65536 bytes 제한) ──────────────
+const MAX_RV = 65536;
+function randUint8(n) {
+  const out = new Uint8Array(n);
+  for (let off = 0; off < n; off += MAX_RV)
+    crypto.getRandomValues(out.subarray(off, Math.min(off + MAX_RV, n)));
+  return out;
+}
+function randUint32(n) {
+  const out = new Uint32Array(n);
+  const MAX_EL = MAX_RV >> 2;
+  for (let off = 0; off < n; off += MAX_EL)
+    crypto.getRandomValues(out.subarray(off, Math.min(off + MAX_EL, n)));
+  return out;
+}
+
+// ── 분포 정의 ──────────────────────────────────────────────────────────────
+const MODES = [
+  {
+    id: 'uniform',
+    label: 'Uniform',
+    desc: '균등',
+    color: 'var(--c0)',
+    hex: '#7c6af7',
+    generate(n) {
+      return randUint8(n);
+    }
+  },
+  {
+    id: 'normal',
+    label: 'Normal',
+    desc: '정규 (Box-Muller)',
+    color: 'var(--c1)',
+    hex: '#f76a8a',
+    generate(n) {
+      const out = new Float32Array(n);
+      const tmp = randUint32(n * 2);
+      for (let i = 0; i < n; i++) {
+        const u1 = (tmp[2*i] >>> 0) / 0xffffffff + 1e-9;
+        const u2 = (tmp[2*i+1] >>> 0) / 0xffffffff;
+        out[i] = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+      }
+      return out;
+    }
+  },
+  {
+    id: 'exponential',
+    label: 'Exp',
+    desc: '지수',
+    color: 'var(--c2)',
+    hex: '#6af7b8',
+    generate(n) {
+      const out = new Float32Array(n);
+      const tmp = randUint32(n);
+      for (let i = 0; i < n; i++) {
+        const u = (tmp[i] >>> 0) / 0x100000000 + 1e-12;
+        out[i] = -Math.log(u);
+      }
+      return out;
+    }
+  },
+  {
+    id: 'triangular',
+    label: 'Triangle',
+    desc: '삼각',
+    color: 'var(--c3)',
+    hex: '#f7c86a',
+    generate(n) {
+      const out = new Float32Array(n);
+      const tmp = randUint32(n * 2);
+      for (let i = 0; i < n; i++) {
+        const u1 = (tmp[2*i] >>> 0) / 0x100000000;
+        const u2 = (tmp[2*i+1] >>> 0) / 0x100000000;
+        out[i] = (u1 + u2) / 2;
+      }
+      return out;
+    }
+  },
+  {
+    id: 'bimodal',
+    label: 'Bimodal',
+    desc: '이중 정규',
+    color: 'var(--c4)',
+    hex: '#6ab8f7',
+    generate(n) {
+      const out = new Float32Array(n);
+      const tmp = randUint32(n * 3);
+      for (let i = 0; i < n; i++) {
+        const u1 = (tmp[3*i] >>> 0) / 0xffffffff + 1e-9;
+        const u2 = (tmp[3*i+1] >>> 0) / 0xffffffff;
+        const side = (tmp[3*i+2] >>> 0) < 0x80000000 ? -1 : 1;
+        const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+        out[i] = z * 0.5 + side * 1.6;
+      }
+      return out;
+    }
+  }
+];
+
+// ── 상태 ──────────────────────────────────────────────────────────────────
+let activeIds = new Set(['uniform', 'normal']);
+let viewMode = 'separate'; // 'separate' | 'overlay'
+let running = false;
+let lastResults = {}; // id → {counts, min, max, mean, std, bins}
+
+// ── DOM 참조 ──────────────────────────────────────────────────────────────
+const chipsEl   = document.getElementById('mode-chips');
+const regenBtn  = document.getElementById('regen');
+const progBar   = document.getElementById('prog-bar');
+const progFill  = document.getElementById('prog-fill');
+const statusEl  = document.getElementById('status');
+const panelsGrid= document.getElementById('panels-grid');
+const overlayWrap= document.getElementById('overlay-wrap');
+const overlayCanvas = document.getElementById('overlay-canvas');
+const overlayLegend = document.getElementById('overlay-legend');
+const binsInput = document.getElementById('bins');
+
+// ── Chip 생성 ─────────────────────────────────────────────────────────────
+MODES.forEach(m => {
+  const chip = document.createElement('div');
+  chip.className = 'chip' + (activeIds.has(m.id) ? ' active' : '');
+  chip.dataset.id = m.id;
+  chip.innerHTML = `<span class="dot" style="background:${m.hex}"></span>${m.label}<small style="color:var(--muted);font-size:.68rem;margin-left:2px">${m.desc}</small>`;
+  chip.addEventListener('click', () => {
+    if (activeIds.has(m.id)) {
+      if (activeIds.size === 1) return;
+      activeIds.delete(m.id);
+      chip.classList.remove('active');
+    } else {
+      activeIds.add(m.id);
+      chip.classList.add('active');
+    }
+  });
+  chipsEl.appendChild(chip);
+});
+
+// ── 뷰 토글 ───────────────────────────────────────────────────────────────
+document.getElementById('btn-separate').addEventListener('click', () => {
+  viewMode = 'separate';
+  document.getElementById('btn-separate').classList.add('active');
+  document.getElementById('btn-overlay').classList.remove('active');
+  renderAll();
+});
+document.getElementById('btn-overlay').addEventListener('click', () => {
+  viewMode = 'overlay';
+  document.getElementById('btn-overlay').classList.add('active');
+  document.getElementById('btn-separate').classList.remove('active');
+  renderAll();
+});
+
+// ── 히스토그램 계산 ──────────────────────────────────────────────────────
+function makeCounts(values, binCount) {
+  let min = Infinity, max = -Infinity;
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] < min) min = values[i];
+    if (values[i] > max) max = values[i];
+  }
+  const range = max - min || 1;
+  const counts = new Float64Array(binCount);
+  for (let i = 0; i < values.length; i++) {
+    let b = Math.floor((values[i] - min) / range * binCount);
+    if (b >= binCount) b = binCount - 1;
+    counts[b]++;
+  }
+  // mean / std
+  let sum = 0, sum2 = 0;
+  for (let i = 0; i < values.length; i++) { sum += values[i]; sum2 += values[i]*values[i]; }
+  const mean = sum / values.length;
+  const std  = Math.sqrt(sum2/values.length - mean*mean);
+  return { counts, min, max, mean, std, binCount };
+}
+
+// ── 메인 생성 루프 ────────────────────────────────────────────────────────
+regenBtn.addEventListener('click', startGenerate);
+
+async function startGenerate() {
+  if (running) return;
+  running = true;
+  regenBtn.disabled = true;
+  progFill.style.width = '0%';
+  lastResults = {};
+
+  const ids   = [...activeIds];
+  const n     = Math.max(1000, Number(document.getElementById('times').value));
+  const bins  = Math.max(16, Math.min(512, Number(binsInput.value)));
+  const CHUNK = 100000;
+
+  let total = ids.length * n;
+  let done  = 0;
+
+  for (const id of ids) {
+    const mode = MODES.find(m => m.id === id);
+    statusEl.textContent = `${mode.label} 분포 생성 중…`;
+
+    let all = null;
+    let gen = 0;
+    while (gen < n) {
+      const size = Math.min(CHUNK, n - gen);
+      const chunk = mode.generate(size);
+      if (!all) {
+        all = chunk instanceof Uint8Array ? new Float32Array(n) : new Float32Array(n);
+      }
+      all.set(chunk, gen);
+      gen += size;
+      done += size;
+      progFill.style.width = (done / total * 100).toFixed(1) + '%';
+      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+    }
+
+    lastResults[id] = makeCounts(all, bins);
+  }
+
+  progFill.style.width = '100%';
+  await new Promise(r => setTimeout(r, 300));
+  progFill.style.width = '0%';
+  statusEl.textContent = `완료 — ${ids.length}개 분포, ${n.toLocaleString()} 샘플`;
+  running = false;
+  regenBtn.disabled = false;
+
+  renderAll();
+}
+
+// ── 렌더링 ────────────────────────────────────────────────────────────────
+function renderAll() {
+  const ids = [...activeIds].filter(id => lastResults[id]);
+
+  if (viewMode === 'overlay') {
+    overlayWrap.classList.add('visible');
+    panelsGrid.querySelectorAll('.panel').forEach(p => p.classList.remove('visible'));
+    drawOverlay(ids);
+  } else {
+    overlayWrap.classList.remove('visible');
+    drawSeparate(ids);
+  }
+}
+
+function fmtNum(v) {
+  if (Math.abs(v) >= 1000) return v.toFixed(0);
+  if (Math.abs(v) >= 10)   return v.toFixed(2);
+  return v.toFixed(3);
+}
+
+function ensurePanel(id) {
+  let panel = panelsGrid.querySelector(`.panel[data-id="${id}"]`);
+  if (!panel) {
+    const mode = MODES.find(m => m.id === id);
+    panel = document.createElement('div');
+    panel.className = 'panel';
+    panel.dataset.id = id;
+    panel.innerHTML = `
+      <div class="panel-header">
+        <div class="panel-dot" style="background:${mode.hex}"></div>
+        <span class="panel-title">${mode.label}</span>
+        <small style="color:var(--muted);font-size:.7rem;margin-left:4px">${mode.desc}</small>
+        <div class="panel-stats" id="stats-${id}"></div>
+      </div>
+      <canvas class="dist-canvas" id="canvas-${id}" width="600" height="160"></canvas>
+    `;
+    panelsGrid.appendChild(panel);
+  }
+  return panel;
+}
+
+function drawSeparate(ids) {
+  // hide panels not in ids
+  panelsGrid.querySelectorAll('.panel').forEach(p => {
+    p.classList.toggle('visible', ids.includes(p.dataset.id));
+  });
+
+  for (const id of ids) {
+    const panel  = ensurePanel(id);
+    panel.classList.add('visible');
+
+    const res  = lastResults[id];
+    const mode = MODES.find(m => m.id === id);
+    const canvas = panel.querySelector(`#canvas-${id}`);
+    const statsEl = panel.querySelector(`#stats-${id}`);
+
+    statsEl.innerHTML = `
+      <span>μ=${fmtNum(res.mean)}</span>
+      <span>σ=${fmtNum(res.std)}</span>
+      <span>[${fmtNum(res.min)}, ${fmtNum(res.max)}]</span>
+    `;
+
+    drawHistogram(canvas, res.counts, mode.hex, false);
+  }
+}
+
+function drawOverlay(ids) {
+  // legend
+  overlayLegend.innerHTML = ids.map(id => {
+    const m = MODES.find(m => m.id === id);
+    const r = lastResults[id];
+    return `<div class="legend-item">
+      <div class="legend-line" style="background:${m.hex}"></div>
+      <span style="color:${m.hex}">${m.label}</span>
+      <span>μ=${fmtNum(r.mean)} σ=${fmtNum(r.std)}</span>
+    </div>`;
+  }).join('');
+
+  const canvas = overlayCanvas;
+  const W = canvas.width, H = canvas.height;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  if (ids.length === 0) return;
+
+  // normalise each to [0,1] independently then draw
+  const allResults = ids.map(id => ({ id, res: lastResults[id], mode: MODES.find(m => m.id === id) }));
+
+  // find global bin count (use the first result's)
+  const binCount = allResults[0].res.binCount;
+
+  // draw grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    ctx.beginPath();
+    ctx.moveTo(0, H * i/4);
+    ctx.lineTo(W, H * i/4);
+    ctx.stroke();
+  }
+
+  for (const { res, mode } of allResults) {
+    const max = Math.max(...res.counts);
+    const bw  = W / binCount;
+    const hex = mode.hex;
+    ctx.fillStyle = hexAlpha(hex, 0.18);
+    ctx.strokeStyle = hex;
+    ctx.lineWidth = 1.5;
+
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let i = 0; i < binCount; i++) {
+      const h = res.counts[i] / max * H;
+      const x = i * bw + bw/2;
+      ctx.lineTo(x, H - h);
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    for (let i = 0; i < binCount; i++) {
+      const h = res.counts[i] / max * H;
+      const x = i * bw + bw/2;
+      if (i === 0) ctx.moveTo(x, H - h);
+      else ctx.lineTo(x, H - h);
+    }
+    ctx.stroke();
+  }
+}
+
+function drawHistogram(canvas, counts, hex, shared) {
+  const W = canvas.width || 600;
+  const H = canvas.height || 160;
+  canvas.width = W; // force redraw
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  const max = Math.max(...counts);
+  const bw  = W / counts.length;
+
+  // subtle grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    ctx.beginPath(); ctx.moveTo(0, H*i/4); ctx.lineTo(W, H*i/4); ctx.stroke();
+  }
+
+  // fill gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, hexAlpha(hex, 0.85));
+  grad.addColorStop(1, hexAlpha(hex, 0.25));
+  ctx.fillStyle = grad;
+
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  for (let i = 0; i < counts.length; i++) {
+    const h = counts[i] / max * H;
+    ctx.lineTo(i * bw, H - h);
+    ctx.lineTo((i+1) * bw, H - h);
+  }
+  ctx.lineTo(W, H);
+  ctx.closePath();
+  ctx.fill();
+
+  // top line
+  ctx.strokeStyle = hex;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let i = 0; i < counts.length; i++) {
+    const h = counts[i] / max * H;
+    if (i === 0) ctx.moveTo(0, H - h);
+    ctx.lineTo((i+0.5) * bw, H - h);
+  }
+  ctx.stroke();
+}
+
+function hexAlpha(hex, a) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+// 초기 실행
+startGenerate();
+</script>
+</body>
+</html>
