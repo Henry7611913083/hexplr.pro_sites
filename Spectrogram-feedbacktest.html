@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>Microphone FFT & Spectrogram Visualizer with Fullswing Sweep</title>
+  <style>
+    :root {
+      --bg-color: #121212;
+      --panel-bg: #1e1e1e;
+      --text-color: #e0e0e0;
+      --accent-color: #00adb5;
+    }
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 { margin-bottom: 20px; font-size: 1.5rem; }
+    .container {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      width: 100%;
+      max-width: 900px;
+    }
+    .controls {
+      background: var(--panel-bg);
+      padding: 20px;
+      border-radius: 8px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 15px;
+    }
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    label { font-size: 0.85rem; color: #aaa; }
+    input[type="range"], select, button {
+      width: 100%;
+      padding: 8px;
+      border-radius: 4px;
+      border: 1px solid #333;
+      background: #2a2a2a;
+      color: #fff;
+      box-sizing: border-box;
+    }
+    button {
+      background: var(--accent-color);
+      border: none;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 10px;
+      padding: 12px;
+      font-size: 1rem;
+    }
+    button:hover { opacity: 0.9; }
+    button.paused { background: #ff9800; }
+    .visualizer-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    canvas {
+      background: #000;
+      border-radius: 6px;
+      width: 100%;
+      height: 200px;
+    }
+    .canvas-title {
+      font-size: 0.9rem;
+      font-weight: bold;
+      color: var(--accent-color);
+    }
+  </style>
+</head>
+<body>
+
+  <h1>오디오 분석 및 주파수 풀스윙 스위프 시스템</h1>
+
+  <div class="container">
+    <button id="btn-toggle">시작 (Start)</button>
+
+    <div class="controls">
+      <div class="control-group">
+        <label for="tone-type">스피커 출력 파형 (Tone Generator)</label>
+        <select id="tone-type">
+          <option value="sine">사인파 (Sine)</option>
+          <option value="square">사각파 (Square)</option>
+          <option value="triangle">삼각파 (Triangle)</option>
+          <option value="sawtooth">톱니파 (Sawtooth)</option>
+          <option value="noise">화이트 노이즈 (White Noise)</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label for="tone-freq">톤 주파수: <span id="val-freq">440</span> Hz (Max: <span id="val-max-freq">Nyquist</span> Hz)</label>
+        <input type="range" id="tone-freq" min="20" max="22050" step="1" value="440">
+      </div>
+
+      <div class="control-group">
+        <label for="speaker-gain">스피커 출력 음량: <span id="val-speaker">0</span>%</label>
+        <input type="range" id="speaker-gain" min="0" max="1" step="0.01" value="0">
+      </div>
+
+      <div class="control-group">
+        <label for="fft-exp">FFT Size ($2^n$): <span id="val-fft">2048</span> (n=<span id="val-exp">11</span>)</label>
+        <input type="range" id="fft-exp" min="5" max="14" step="1" value="11">
+      </div>
+
+      <div class="control-group">
+        <label for="fullswing-mode">풀스윙 모드 (자동 주파수 왕복 스위프)</label>
+        <select id="fullswing-mode">
+          <option value="off">Off (Bypass)</option>
+          <option value="linear">Linear Full-swing</option>
+          <option value="log">Logarithmic Full-swing</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label for="freq-scale">주파수 축 스케일 (시각화용)</label>
+        <select id="freq-scale">
+          <option value="linear">Linear (선형)</option>
+          <option value="log">Logarithmic (로그)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="visualizer-container">
+      <div class="canvas-title">실시간 FFT 주파수 스펙트럼 (마이크 입력)</div>
+      <canvas id="canvas-fft" width="800" height="200"></canvas>
+
+      <div class="canvas-title">스펙트로그램 (Pre-Fullswing 마이크 분석)</div>
+      <canvas id="canvas-spectrogram" width="800" height="200"></canvas>
+    </div>
+  </div>
+
+  <script>
+    let audioCtx;
+    let micSource, analyser;
+    let toneOscillator, noiseNode, toneGainNode, fullswingNode, speakerGainNode;
+    let isInitialized = false;
+
+    // 풀스윙 스위프(Sweep) 애니메이션용 변수
+    let sweepDirection = 1; // 1: 증가, -1: 감소
+    let sweepSpeed = 50;    // 프레임당 이동 Hz
+
+    // Canvas
+    const canvasFFT = document.getElementById('canvas-fft');
+    const ctxFFT = canvasFFT.getContext('2d');
+    const canvasSpec = document.getElementById('canvas-spectrogram');
+    const ctxSpec = canvasSpec.getContext('2d');
+
+    // UI Elements
+    const btnToggle = document.getElementById('btn-toggle');
+    const selectToneType = document.getElementById('tone-type');
+    const inputToneFreq = document.getElementById('tone-freq');
+    const inputSpeakerGain = document.getElementById('speaker-gain');
+    const inputFftExp = document.getElementById('fft-exp');
+    const selectFullswing = document.getElementById('fullswing-mode');
+    const selectScale = document.getElementById('freq-scale');
+
+    // Labels
+    const valFreq = document.getElementById('val-freq');
+    const valMaxFreq = document.getElementById('val-max-freq');
+    const valSpeaker = document.getElementById('val-speaker');
+    const valFft = document.getElementById('val-fft');
+    const valExp = document.getElementById('val-exp');
+
+    // 오디오 파이프라인 초기화
+    async function initAudio() {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+      // 감지된 스피커의 샘플링 주파수 절반(Nyquist Frequency) 계산 및 설정
+      const nyquistFreq = audioCtx.sampleRate / 2;
+      inputToneFreq.max = nyquistFreq;
+      valMaxFreq.innerText = nyquistFreq;
+
+      // 1. 마이크 수신 (Pre-Fullswing FFT 분석 전용)
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      });
+      micSource = audioCtx.createMediaStreamSource(stream);
+
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = Math.pow(2, parseInt(inputFftExp.value));
+      analyser.smoothingTimeConstant = 0.8;
+
+      micSource.connect(analyser);
+
+      // 2. 스피커 출력용 톤 생성기
+      setupToneGenerator();
+
+      // 3. 풀스윙 노드
+      fullswingNode = audioCtx.createScriptProcessor(4096, 1, 1);
+      fullswingNode.onaudioprocess = processFullswing;
+
+      // 4. 스피커 피드백 제어 노드
+      speakerGainNode = audioCtx.createGain();
+      speakerGainNode.gain.value = parseFloat(inputSpeakerGain.value);
+
+      // 연결
+      toneGainNode.connect(fullswingNode);
+      fullswingNode.connect(speakerGainNode);
+      speakerGainNode.connect(audioCtx.destination);
+
+      isInitialized = true;
+      render();
+    }
+
+    // 톤 생성기 설정
+    function setupToneGenerator() {
+      toneGainNode = audioCtx.createGain();
+
+      const type = selectToneType.value;
+      const freq = parseFloat(inputToneFreq.value);
+
+      if (type === 'noise') {
+        const bufferSize = audioCtx.sampleRate * 2;
+        const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = Math.random() * 2 - 1;
+        }
+        noiseNode = audioCtx.createBufferSource();
+        noiseNode.buffer = noiseBuffer;
+        noiseNode.loop = true;
+        noiseNode.start();
+        noiseNode.connect(toneGainNode);
+      } else {
+        toneOscillator = audioCtx.createOscillator();
+        toneOscillator.type = type;
+        toneOscillator.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        toneOscillator.start();
+        toneOscillator.connect(toneGainNode);
+      }
+    }
+
+    function updateToneSource() {
+      if (!isInitialized) return;
+
+      if (toneOscillator) {
+        toneOscillator.stop();
+        toneOscillator.disconnect();
+        toneOscillator = null;
+      }
+      if (noiseNode) {
+        noiseNode.stop();
+        noiseNode.disconnect();
+        noiseNode = null;
+      }
+
+      setupToneGenerator();
+      toneGainNode.connect(fullswingNode);
+    }
+
+    // 풀스윙 오디오 신호 가공
+    function processFullswing(e) {
+      const input = e.inputBuffer.getChannelData(0);
+      const output = e.outputBuffer.getChannelData(0);
+      const mode = selectFullswing.value;
+
+      let maxPeak = 0;
+      if (mode !== 'off') {
+        for (let i = 0; i < input.length; i++) {
+          const abs = Math.abs(input[i]);
+          if (abs > maxPeak) maxPeak = abs;
+        }
+      }
+
+      for (let i = 0; i < input.length; i++) {
+        let sample = input[i];
+
+        if (mode === 'linear' && maxPeak > 0) {
+          sample = sample / maxPeak;
+        } else if (mode === 'log') {
+          const sign = Math.sign(sample);
+          sample = sign * (Math.log(1 + 10 * Math.abs(sample)) / Math.log(11));
+        }
+
+        output[i] = sample;
+      }
+    }
+
+    // 풀스윙 주파수 자동 스위핑 (좌우 이동)
+    function updateFrequencySweep() {
+      if (selectFullswing.value === 'off' || selectToneType.value === 'noise') return;
+
+      let currentFreq = parseFloat(inputToneFreq.value);
+      const minFreq = parseFloat(inputToneFreq.min);
+      const maxFreq = parseFloat(inputToneFreq.max);
+
+      currentFreq += sweepSpeed * sweepDirection;
+
+      // 양끝 경계에 도달 시 방향 전환
+      if (currentFreq >= maxFreq) {
+        currentFreq = maxFreq;
+        sweepDirection = -1;
+      } else if (currentFreq <= minFreq) {
+        currentFreq = minFreq;
+        sweepDirection = 1;
+      }
+
+      // UI 및 발신기 주파수 동기화
+      inputToneFreq.value = currentFreq;
+      valFreq.innerText = Math.round(currentFreq);
+
+      if (toneOscillator) {
+        toneOscillator.frequency.setValueAtTime(currentFreq, audioCtx.currentTime);
+      }
+    }
+
+    // --- Event Listeners ---
+
+    btnToggle.addEventListener('click', async () => {
+      if (!isInitialized) {
+        await initAudio();
+        btnToggle.innerText = "일시정지 (Pause)";
+        btnToggle.classList.add('paused');
+        return;
+      }
+
+      if (audioCtx.state === 'running') {
+        await audioCtx.suspend();
+        btnToggle.innerText = "재개 (Resume)";
+        btnToggle.classList.remove('paused');
+      } else if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+        btnToggle.innerText = "일시정지 (Pause)";
+        btnToggle.classList.add('paused');
+      }
+    });
+
+    selectToneType.addEventListener('change', updateToneSource);
+
+    inputToneFreq.addEventListener('input', (e) => {
+      const freq = parseFloat(e.target.value);
+      valFreq.innerText = Math.round(freq);
+      if (toneOscillator) {
+        toneOscillator.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      }
+    });
+
+    inputSpeakerGain.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      valSpeaker.innerText = Math.round(val * 100);
+      if (speakerGainNode) speakerGainNode.gain.value = val;
+    });
+
+    inputFftExp.addEventListener('input', (e) => {
+      const exp = parseInt(e.target.value);
+      const fftSize = Math.pow(2, exp);
+      valExp.innerText = exp;
+      valFft.innerText = fftSize;
+      if (analyser) analyser.fftSize = fftSize;
+    });
+
+    // 렌더링 루프
+    function render() {
+      if (audioCtx && audioCtx.state === 'running') {
+        // 주파수 좌우 스위프 갱신
+        updateFrequencySweep();
+
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Float32Array(bufferLength);
+        analyser.getFloatFrequencyData(dataArray);
+
+        const scaleMode = selectScale.value;
+
+        drawFFT(dataArray, bufferLength, scaleMode);
+        drawSpectrogram(dataArray, bufferLength, scaleMode);
+      }
+      requestAnimationFrame(render);
+    }
+
+    // FFT 그리기
+    function drawFFT(dataArray, bufferLength, scaleMode) {
+      ctxFFT.fillStyle = '#000';
+      ctxFFT.fillRect(0, 0, canvasFFT.width, canvasFFT.height);
+
+      ctxFFT.beginPath();
+      ctxFFT.strokeStyle = '#00adb5';
+      ctxFFT.lineWidth = 2;
+
+      for (let i = 0; i < bufferLength; i++) {
+        const db = Math.max(-100, Math.min(0, dataArray[i]));
+        const y = canvasFFT.height - ((db + 100) / 100) * canvasFFT.height;
+
+        let x;
+        if (scaleMode === 'linear') {
+          x = (i / bufferLength) * canvasFFT.width;
+        } else {
+          const logIndex = Math.log2(i + 1) / Math.log2(bufferLength);
+          x = logIndex * canvasFFT.width;
+        }
+
+        if (i === 0) ctxFFT.moveTo(x, y);
+        else ctxFFT.lineTo(x, y);
+      }
+      ctxFFT.stroke();
+    }
+
+    // 스펙트로그램 그리기
+    function drawSpectrogram(dataArray, bufferLength, scaleMode) {
+      const imgData = ctxSpec.getImageData(1, 0, canvasSpec.width - 1, canvasSpec.height);
+      ctxSpec.putImageData(imgData, 0, 0);
+
+      const x = canvasSpec.width - 1;
+
+      for (let y = 0; y < canvasSpec.height; y++) {
+        const normalizedY = (canvasSpec.height - y) / canvasSpec.height;
+        let binIndex;
+
+        if (scaleMode === 'linear') {
+          binIndex = Math.floor(normalizedY * bufferLength);
+        } else {
+          binIndex = Math.floor(Math.pow(bufferLength, normalizedY) - 1);
+        }
+
+        binIndex = Math.max(0, Math.min(bufferLength - 1, binIndex));
+
+        const db = Math.max(-100, Math.min(0, dataArray[binIndex]));
+        const intensity = (db + 100) / 100;
+
+        const hue = (1 - intensity) * 240;
+        ctxSpec.fillStyle = `hsl(${hue}, 100%, ${intensity * 50}%)`;
+        ctxSpec.fillRect(x, y, 1, 1);
+      }
+    }
+  </script>
+</body>
+</html>
